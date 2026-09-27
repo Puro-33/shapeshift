@@ -30,8 +30,8 @@ function Tree({ nodes, teamId, activeId, go }) {
     const ch = kids[n.id] || [];
     const isOpen = open[n.id] ?? depth === 0;
     return html`<div key=${n.id}>
-      <a class="nav ${activeId === n.id ? 'active' : ''}" style=${`padding-left:${8 + depth * 14}px`} href=${`#/t/${teamId}/n/${n.id}`} data-node-id=${n.id} data-node-type=${n.type} aria-current=${activeId === n.id ? 'page' : null}>
-        <span class="caret" role="button" aria-label=${isOpen ? '접기' : '펼치기'} onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setOpen({ ...open, [n.id]: !isOpen }); }}>${ch.length ? (isOpen ? '▾' : '▸') : ''}</span>
+      <a class="nav ${activeId === n.id ? 'active' : ''}" style=${`padding-left:${8 + depth * 14}px`} href=${`#/t/${teamId}/n/${n.id}`} data-node-id=${n.id} data-node-type=${n.type} aria-label=${n.title} aria-current=${activeId === n.id ? 'page' : null}>
+        <span class="caret" aria-hidden="true" title=${isOpen ? '접기' : '펼치기'} onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setOpen({ ...open, [n.id]: !isOpen }); }}>${ch.length ? (isOpen ? '▾' : '▸') : ''}</span>
         <span class="ic">${n.icon || (n.type === 'collection' ? '🗂' : '📄')}</span><span style="overflow:hidden;text-overflow:ellipsis">${n.title}</span>
       </a>
       ${isOpen ? ch.map((c) => row(c, depth + 1)) : null}
