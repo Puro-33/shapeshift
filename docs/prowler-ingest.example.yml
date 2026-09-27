@@ -1,0 +1,36 @@
+# Copy into your *project* repo as .github/workflows/prowler.yml
+# Runs Prowler against the CloudGoat/test AWS account and sends the result to Shapeshift,
+# which tracks new / persisting / resolved findings per scan (DevSecOps "re-scan to verify").
+# Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (read-only SecurityAudit role recommended),
+#          SHAPESHIFT_URL, SHAPESHIFT_TOKEN (team API token from 팀 설정 > Ingest API 토큰)
+name: prowler
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 1 * * 1"   # Mondays 10:00 KST
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install prowler
+      - name: Scan (IAM + S3 focus keeps it fast)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: prowler aws --services iam s3 -M json-ocsf -o out -F scan || true
+      - name: Send to Shapeshift
+        run: |
+          python - <<'EOF'
+          import json, os, urllib.request
+          content = open("out/scan.ocsf.json").read()
+          body = json.dumps({"kind": "prowler", "content": content, "source": f"github-actions:{os.environ['GITHUB_REPOSITORY']}", "title": f"Prowler 스캔 #{os.environ['GITHUB_RUN_NUMBER']}"}).encode()
+          req = urllib.request.Request(os.environ["URL"] + "/api/ingest", data=body, headers={"Authorization": "Bearer " + os.environ["TOKEN"], "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req, timeout=120).read().decode()[:500])
+          EOF
+        env:
+          URL: ${{ secrets.SHAPESHIFT_URL }}
+          TOKEN: ${{ secrets.SHAPESHIFT_TOKEN }}

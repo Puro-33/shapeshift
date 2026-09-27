@@ -1,0 +1,21 @@
+name: test
+on:
+  push: { branches: [main] }
+  pull_request: {}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --omit=dev
+      - name: Golden scenarios (SPEC §11)
+        run: node --test test/golden.test.js
+      - name: HTTP smoke test
+        run: |
+          PORT=8788 STORE_FILE=none CRON_SECRET=local-cron node server/index.js &
+          sleep 2
+          node test/smoke.mjs http://127.0.0.1:8788 | tee smoke.txt
+          grep -q "21/21 passed" smoke.txt

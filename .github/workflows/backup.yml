@@ -1,0 +1,27 @@
+# Weekly logical backup of the Neon Free database (the free plan only keeps a 6-hour restore window).
+# Secret: DATABASE_URL (Neon connection string). Artifacts are private to the repo and kept 90 days.
+name: backup
+on:
+  schedule:
+    - cron: "0 18 * * 6"  # Sunday 03:00 KST
+  workflow_dispatch: {}
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install pg_dump 17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17
+      - name: Dump
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --no-owner --format=custom -f shapeshift-$(date +%F).dump
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup
+          path: "*.dump"
+          retention-days: 90

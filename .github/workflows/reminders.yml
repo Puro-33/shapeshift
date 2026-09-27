@@ -1,0 +1,22 @@
+# Free scheduler: pings the app daily so Discord gets D-2 / D-day reminders.
+# Secrets: APP_URL (e.g. https://shapeshift.onrender.com), CRON_SECRET (same value as the Render env var)
+name: reminders
+on:
+  schedule:
+    - cron: "0 0 * * *"   # 09:00 KST daily
+  workflow_dispatch: {}
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake the free Render instance (cold start can take ~1 min)
+        run: |
+          for i in 1 2 3 4 5 6; do
+            curl -fsS --max-time 30 "${{ secrets.APP_URL }}/api/health" && break || sleep 15
+          done
+      - name: Send reminders
+        run: |
+          curl -fsS -X POST --max-time 60 \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/tick"
