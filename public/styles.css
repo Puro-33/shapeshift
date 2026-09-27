@@ -163,8 +163,8 @@ table.tbl td.tt a:hover { text-decoration: underline; }
 .pb-actions .hint { color: var(--faint); font-size: 12px; }
 .chip { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; background: #f1f0ec; border-radius: 6px; padding: 2px 8px; margin-right: 6px; }
 .suggest { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-.suggest button { font-size: 12.5px; border: 1px solid var(--line); background: rgba(255,255,255,.9); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
-.suggest button:hover { border-color: var(--accent); color: var(--accent); }
+.suggest button, .suggest a { font-size: 12.5px; border: 1px solid var(--line); background: rgba(255,255,255,.9); border-radius: 999px; padding: 3px 10px; cursor: pointer; color: var(--text); }
+.suggest button:hover, .suggest a:hover { border-color: var(--accent); color: var(--accent); }
 .plan { position: absolute; right: 16px; top: 60px; width: 420px; max-height: calc(100% - 190px); overflow: auto; z-index: 45; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
 .plan-h { padding: 12px 14px; border-bottom: 1px solid var(--line2); display: flex; gap: 8px; align-items: flex-start; }
 .plan-b { padding: 10px 14px; }

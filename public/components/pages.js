@@ -175,8 +175,10 @@ export function NodePage({ id }) {
   };
   const title = html`<h1 class="title">${node.icon ? html`<span style="margin-right:8px">${node.icon}</span>` : null}<span contenteditable="true" style="outline:none" onBlur=${(e) => rename(e.currentTarget.innerText.trim())} onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}>${node.title}</span></h1>`;
 
+  const aiLinks = html`<span class="row small" style="gap:10px"><a href=${`/p/${node.id}`} target="_blank" rel="noopener" title="JS 없이 읽히는 시맨틱 HTML + 편집 폼">🔍 AI용 보기</a><a href=${`/p/${node.id}.md`} target="_blank" rel="noopener">Markdown</a><a href="#" onClick=${(e) => { e.preventDefault(); app.promptApi.current.myAi?.(''); }}>🤖 내 AI에게 맡기기</a></span>`;
   if (node.type === 'collection') {
-    return html`<div style="max-width:1400px;margin:0 auto">
+    return html`<div style="max-width:1400px;margin:0 auto" data-node-id=${node.id} data-node-type="collection">
+      ${aiLinks}
       ${title}
       ${node.content?.length ? html`<div class="subtle small">${node.content.map((b) => b.text).filter(Boolean).join(' ')}</div>` : null}
       <${CollectionView} col=${node} items=${children} onChanged=${() => { reload(); app.reloadTeam(); }} />
@@ -188,7 +190,8 @@ export function NodePage({ id }) {
     ${validation && node.props && parentFields?.some((f) => f.name === '상태') ? html`<button class="btn sm" onClick=${markDone}>✔ 제출 완료로 표시</button>` : null}
     ${validation?.kind === 'weekly_report' ? html`<button class="btn sm primary" onClick=${() => app.submitPrompt(`${node.title} 초안을 활동 로그 기준으로 다시 만들어줘`)}>✨ 다시 생성</button>` : null}
   </div>`;
-  const body = html`<div>
+  const body = html`<div data-node-id=${node.id} data-node-type=${node.type}>
+    ${aiLinks}
     ${title}
     ${parentFields ? html`<div class="props">${parentFields.map((f) => html`<div class="k">${f.name}</div><div class="v"><${FieldInput} field=${f} value=${node.props?.[f.id]} members=${members} onChange=${async (v) => { await app.runOps([{ op: 'update_node', node: node.id, values: { [f.name]: v } }], `${f.name} 변경`); reload(); }} /></div>`)}</div>` : null}
     ${actions}

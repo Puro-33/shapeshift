@@ -1,10 +1,12 @@
 # Render Blueprint: single free web service. Database lives on Neon Free (no expiry).
 # Render Free Postgres is intentionally NOT used (expires 30 days after creation).
+# No LLM keys: Shapeshift has no built-in AI. Users bring their own AI (AI browsers, chat AIs, MCP clients).
 services:
   - type: web
     name: shapeshift
     runtime: node
     plan: free
+    region: oregon
     buildCommand: npm install --omit=dev
     startCommand: npm start
     healthCheckPath: /api/health
@@ -13,22 +15,12 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: DATABASE_URL
-        sync: false # Neon connection string (pooled), set in dashboard
+        sync: false # Neon pooled connection string, set in dashboard
       - key: SESSION_SECRET
         generateValue: true
       - key: CRON_SECRET
         generateValue: true
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GROQ_API_KEY
-        sync: false
-      - key: GEMINI_MODEL
-        value: gemini-flash-latest
-      - key: GROQ_MODEL
-        value: openai/gpt-oss-120b
-      - key: OPEN_SIGNUP
-        value: "true"
-      - key: OPENROUTER_API_KEY
-        sync: false
       - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
+      - key: OPEN_SIGNUP
+        value: "true"

@@ -13,10 +13,10 @@ export function Inbox() {
   const done = async (r) => { await post(`/api/requests/${r.id}/done`); app.reloadTeam(); };
   return html`<div class="page-w">
     <h1 class="title">인박스</h1>
-    <p class="subtle">AI가 제안했지만 아직 적용하지 않은 계획(가져오기 후속 제안 포함)과, 사람만 채울 수 있는 입력 요청이에요.</p>
+    <p class="subtle">개인 AI나 폼으로 제출됐지만 아직 적용하지 않은 계획과, 사람만 채울 수 있는 입력 요청이에요.</p>
     <h3 class="mt2">검토 대기 계획</h3>
     ${loading ? html`<${Spinner} />` : pending.length ? pending.map((p) => html`<div class="card mb row">
-      <div class="grow"><div style="font-weight:600">${p.plan?.summary || p.text}</div><div class="small subtle">${p.origin === 'followup' ? '가져오기 후속 제안 · ' : ''}${(p.plan?.diff || []).length}개 변경 · ${timeAgo(p.createdAt)}</div></div>
+      <div class="grow"><div style="font-weight:600">${p.plan?.summary || p.text}</div><div class="small subtle">${{ 'user-ai': '내 AI JSON · ', markdown: '내 AI Markdown · ', rules: '빠른 명령 · ' }[p.provider] || ''}${(p.plan?.diff || []).length}개 변경 · ${timeAgo(p.createdAt)}</div></div>
       <button class="btn sm" onClick=${() => app.showPlan(p)}>검토</button>
     </div>`) : html`<div class="empty">대기 중인 계획이 없어요</div>`}
     <h3 class="mt2">입력 요청</h3>
@@ -41,6 +41,28 @@ export function Activity() {
         ${!e.revertedAt ? html`<button class="btn sm" onClick=${() => undo(e)}>되돌리기</button>` : null}</div>
       <div class="small subtle" style="margin-top:4px">${(e.diff || []).slice(0, 6).map((d) => `${{ create: '+', update: '~', delete: '-' }[d.action]} ${d.title}`).join('  ·  ')}${(e.diff || []).length > 6 ? ` 외 ${e.diff.length - 6}` : ''}</div>
     </div>`)}
+  </div>`;
+}
+
+function PersonalAi() {
+  const app = useApp();
+  const list = useAsync(() => get('/api/tokens/personal'), []);
+  const [tok, setTok] = useState(null);
+  const origin = location.origin;
+  const mcpJson = JSON.stringify({ mcpServers: { shapeshift: { type: 'http', url: `${origin}/mcp`, headers: { Authorization: `Bearer ${tok || 'ss_...'}` } } } }, null, 2);
+  return html`<div class="card mt col" id="personal-ai">
+    <h3>🤖 개인 AI 연결</h3>
+    <div class="small subtle">Shapeshift에는 내장 AI가 없어요. 각자 쓰는 AI가 읽고 편집해요. 모든 변경은 미리보기를 거치고, 변경 기록에서 되돌릴 수 있어요.</div>
+    <div class="grid3">
+      <div><b>AI 브라우저 (Aside 등)</b><div class="small subtle">로그인된 브라우저에서 <a href=${`/t/${app.teamId}`} target="_blank">AI용 보기</a>를 열고 요청하면 돼요. 페이지마다 Markdown 편집 폼과 JSON 폼이 있어요.</div></div>
+      <div><b>채팅 AI (ChatGPT/Claude/Gemini)</b><div class="small subtle">프롬프트 바의 "내 AI에게"로 자료를 복사하고, 답을 다시 붙여넣으면 돼요.</div></div>
+      <div><b>MCP / API (Claude Desktop, Codex 등)</b><div class="small subtle">아래 개인 토큰으로 <code>${origin}/mcp</code>에 연결해요. 토큰은 나와 같은 권한을 가져요.</div></div>
+    </div>
+    ${(list.data?.tokens || []).map((t) => html`<div class="row small"><code>${t.prefix}…</code><span class="grow">${t.name}</span><span class="faint">${t.lastUsedAt ? `최근 사용 ${timeAgo(t.lastUsedAt)}` : '미사용'}</span><button class="btn sm danger" onClick=${async () => { await del(`/api/tokens/personal/${t.id}`); list.reload(); }}>폐기</button></div>`)}
+    <div class="row"><button class="btn sm" onClick=${async () => { const name = prompt('토큰 이름 (예: claude-desktop)', 'my-ai'); if (!name) return; setTok((await post('/api/tokens/personal', { name })).token); list.reload(); }}>개인 토큰 만들기</button>
+      <a class="small" href="/agent" target="_blank">AI 안내 문서</a><a class="small" href="/llms.txt" target="_blank">llms.txt</a></div>
+    ${tok ? html`<div class="note small">지금만 보여요. AI 앱 설정에만 넣고 다른 곳에 공유하지 마세요.<br /><code style="word-break:break-all">${tok}</code></div>` : null}
+    <pre class="code">${mcpJson}</pre>
   </div>`;
 }
 
@@ -69,8 +91,9 @@ export function Settings() {
       ${isPm ? html`<div class="row"><button class="btn sm" onClick=${async () => setInvite((await post(`/api/teams/${app.teamId}/invites`, { role: 'member' })).code)}>초대 코드 만들기</button>
         ${invite ? html`<code>${invite}</code><span class="small subtle">가입 링크: ${origin}/#/login?invite=${invite}</span>` : null}</div>` : null}
     </div>
+    <${PersonalAi} />
     <div class="card mt col">
-      <h3>AI 적용 방식</h3>
+      <h3>변경 적용 방식</h3>
       <label class="row"><input type="radio" name="trust" disabled=${!isPm} checked=${settings.trust !== 'auto'} onChange=${() => save({ settings: { trust: 'confirm' } })} /> 항상 확인 후 적용 (기본)</label>
       <label class="row"><input type="radio" name="trust" disabled=${!isPm} checked=${settings.trust === 'auto'} onChange=${() => save({ settings: { trust: 'auto' } })} /> 안전한 변경(추가·수정)은 바로 적용, 삭제·병합·형식 변경만 확인</label>
     </div>

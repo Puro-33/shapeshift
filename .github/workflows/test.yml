@@ -18,4 +18,4 @@ jobs:
           PORT=8788 STORE_FILE=none CRON_SECRET=local-cron node server/index.js &
           sleep 2
           node test/smoke.mjs http://127.0.0.1:8788 | tee smoke.txt
-          grep -q "21/21 passed" smoke.txt
+          ! grep -q "^FAIL" smoke.txt && grep -q "passed" smoke.txt

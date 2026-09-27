@@ -1,15 +1,14 @@
-// Prompt -> plan -> preview -> apply -> undo. One LLM call per prompt (+1 retry on validation error).
+// Plan -> preview -> apply -> undo. No LLM on the server (BYO-AI):
+// plans come from (1) the user's own AI as ops JSON, (2) an AI-edited Markdown
+// document, or (3) the built-in rule-based quick commands.
 import { executePlan, revertEntry, OpError } from '../core/ops.js';
-import { newId, blocksToText } from '../core/model.js';
-import { SYSTEM_PROMPT, followUpPrompt } from './prompts.js';
-import { completeWithFallback, parseJsonLoose } from './providers.js';
+import { newId } from '../core/model.js';
+import { markdownToOps } from '../core/markdown.js';
 import { heuristicPlan } from './heuristic.js';
-import { maskSecrets } from '../services/ingest.js';
-import { latestSeason, roundForDate } from '../services/season.js';
+import { maskSecrets, ingestMacros } from '../services/ingest.js';
 import { seasonMacros } from '../services/season.js';
 import { teamMacros } from '../services/teams.js';
 import { reportMacros } from '../services/reports.js';
-import { ingestMacros } from '../services/ingest.js';
 import { notionMacros } from '../services/notion.js';
 
 export const MACROS = { ...seasonMacros, ...teamMacros, ...reportMacros, ...ingestMacros, ...notionMacros };
@@ -27,56 +26,37 @@ export async function roleFor(store, user, teamId) {
   return m.role;
 }
 
-function kstToday(now = new Date()) { return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10); }
+export function kstToday(now = new Date()) { return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10); }
 
-export async function buildContext(store, { user, teamId, role, selection, now = new Date() }) {
-  const team = teamId ? await store.get('team', teamId) : null;
-  const season = team?.seasonId ? await store.get('season', team.seasonId) : await latestSeason(store);
-  const today = kstToday(now);
-  const nodes = teamId ? (await store.list('node', { teamId })).filter((n) => !n.deleted) : [];
-  const byParent = new Map();
-  for (const n of nodes) { const k = n.parentId || 'root'; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(n); }
-  const summary = [];
-  for (const n of nodes) {
-    if (n.type === 'item') continue;
-    const entry = { id: n.id, type: n.type, title: n.title, parent: n.parentId || null };
-    if (n.sys) entry.sys = n.sys;
-    if (n.type === 'collection') {
-      entry.fields = (n.fields || []).map((f) => ({ name: f.name, type: f.type, ...(f.options?.length ? { options: f.options.slice(0, 12) } : {}) }));
-      entry.views = (n.views || []).map((v) => `${v.name}(${v.type})`);
-      const items = (byParent.get(n.id) || []).sort((a, b) => (a.sortKey ?? 0) - (b.sortKey ?? 0));
-      entry.itemCount = items.length;
-      entry.items = items.slice(-30).map((it) => {
-        const vals = {};
-        for (const f of n.fields || []) {
-          const v = it.props?.[f.id];
-          if (v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)) vals[f.name] = v;
-        }
-        return { id: it.id, title: it.title, ...(Object.keys(vals).length ? { values: vals } : {}) };
-      });
-    }
-    summary.push(entry);
+/** Parse a plan from an AI reply: raw JSON, {ops}, or JSON inside a ```json fence. */
+export function parsePlanText(text) {
+  const s = String(text || '').trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fence ? fence[1].trim() : s;
+  let j;
+  try { j = JSON.parse(body); } catch {
+    const a = body.indexOf('{'); const b = body.lastIndexOf('}');
+    const a2 = body.indexOf('['); const b2 = body.lastIndexOf(']');
+    try { j = a >= 0 && b > a ? JSON.parse(body.slice(a, b + 1)) : JSON.parse(body.slice(a2, b2 + 1)); } catch { throw new OpError('AI 응답에서 JSON 계획을 찾지 못했어요'); }
   }
-  let selected = null;
-  if (selection?.nodeId) {
-    const s = await store.get('node', selection.nodeId);
-    if (s && (!teamId || s.teamId === teamId)) selected = { id: s.id, type: s.type, title: s.title, text: blocksToText(s.content || []).slice(0, 3000) };
-  }
-  const upcoming = (season?.milestones || []).filter((m) => (m.due || m.start) && (m.due || m.start) >= today).slice(0, 5).map((m) => ({ title: m.title, due: m.due, kind: m.kind }));
-  const ctx = {
-    TODAY: today,
-    user: user ? { name: user.name, role } : null,
-    team: team ? { id: team.id, name: team.name, project: team.projectTitle, topic: team.topic, members: team.members.map((m) => `${m.name}${m.role === 'pm' ? '(PM)' : ''}`) } : null,
-    season: season ? { name: season.name, currentRound: roundForDate(season, today), upcoming } : null,
-    nodes: summary,
-    selected,
-  };
-  let json = JSON.stringify(ctx);
-  if (json.length > 14000) {
-    for (const e of ctx.nodes) if (e.items) e.items = e.items.slice(-10);
-    json = JSON.stringify(ctx);
-  }
-  return { ctx, json };
+  if (Array.isArray(j)) return { ops: j, summary: '' };
+  if (j && Array.isArray(j.ops)) return { ops: j.ops, summary: j.summary || '', reply: j.reply || '' };
+  if (j && j.op) return { ops: [j], summary: '' };
+  throw new OpError('JSON에 ops 배열이 없어요');
+}
+
+export function looksLikeMarkdownDoc(text) {
+  return /^\s*(```(?:markdown|md)?\s*\n)?---\n[\s\S]*?\bid:\s*\S+[\s\S]*?\n---/.test(String(text || '').replace(/\r\n/g, '\n'));
+}
+
+function unfence(text) {
+  const m = String(text).match(/^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/);
+  return m ? m[1] : text;
+}
+
+async function nodeSummaries(store, teamId) {
+  const nodes = teamId ? (await store.list('node', { teamId })).filter((n) => !n.deleted && n.type !== 'item') : [];
+  return nodes.map((n) => ({ id: n.id, type: n.type, title: n.title, sys: n.sys, fields: n.fields }));
 }
 
 function hydrateOps(ops, attachment) {
@@ -92,81 +72,74 @@ function hydrateOps(ops, attachment) {
 }
 
 export class Orchestrator {
-  constructor({ store, providers = [], log = console.log, notify = async () => {} }) {
+  constructor({ store, log = console.log, notify = async () => {} }) {
     this.store = store;
-    this.providers = providers;
     this.log = log;
     this.notify = notify;
   }
 
-  async llmPlan(system, userContent, retryNote, prevText) {
-    const messages = [{ role: 'user', content: userContent }];
-    if (retryNote) messages.push({ role: 'assistant', content: prevText || '{}' }, { role: 'user', content: retryNote });
-    const res = await completeWithFallback(this.providers, { system, messages, maxTokens: 4096 }, { log: this.log });
-    return { ...res, json: parseJsonLoose(res.text) };
-  }
+  /**
+   * Create a previewed plan. Sources (first match wins):
+   *  - ops: array | JSON text from the user's AI
+   *  - markdown + nodeId: an AI-edited Markdown document
+   *  - text: rule-based quick command (pasted plan JSON / Markdown docs are auto-detected)
+   */
+  async plan({ user, teamId, text = '', ops = null, markdown = null, nodeId = null, attachment = null, selection = null, origin = 'prompt', summary = '', now = new Date() }) {
+    const att = attachment ? maskSecrets(attachment).text : null;
+    let source = 'rules';
+    let planJson;
+    let warnings = [];
+    const t = String(text || '').trim();
+    const isPlanJson = (s) => s && /^\s*(```(?:json)?\s*)?[{[]/.test(s) && /"op"\s*:/.test(s);
 
-  async plan({ user, teamId, text, attachment = null, selection = null, origin = 'prompt', system = SYSTEM_PROMPT, now = new Date() }) {
-    const role = await roleFor(this.store, user, teamId);
-    const masked = attachment ? maskSecrets(attachment) : null;
-    const att = masked?.text ?? null;
-    const { ctx, json } = await buildContext(this.store, { user, teamId, role, selection, now });
-    const promptDoc = {
-      id: newId('pr'), userId: user?.id || null, teamId, text: maskSecrets(text || '').text, origin, status: 'planning',
-      attachment: att ? att.slice(0, 400000) : null, selection,
-    };
-    const userContent = `CONTEXT:\n${json}\n\nUSER REQUEST:\n${promptDoc.text}${att ? `\n\nATTACHMENT (${att.length} chars, first 6000 shown; pass it with useAttachment:true):\n${att.slice(0, 6000)}` : ''}`;
-    let planJson = null;
-    let meta = { provider: 'heuristic', model: 'rules', tokensIn: 0, tokensOut: 0, latencyMs: 0 };
-    let rawText = '';
-    let warning = null;
-    const t0 = Date.now();
-    if (this.providers.length) {
-      try {
-        const r = await this.llmPlan(system, userContent);
-        planJson = r.json; rawText = r.text;
-        meta = { provider: r.provider, model: r.model, tokensIn: r.usage.in, tokensOut: r.usage.out, latencyMs: r.latencyMs };
-      } catch (e) {
-        warning = e.message;
-        this.log(`[plan] fallback to heuristic: ${e.message}`);
-      }
+    if (!ops && !markdown && isPlanJson(t)) ops = t;
+    else if (!ops && !markdown && looksLikeMarkdownDoc(t)) markdown = t;
+    else if (!ops && !markdown && isPlanJson(att)) ops = att;
+    else if (!ops && !markdown && att && looksLikeMarkdownDoc(att)) markdown = att;
+    if (markdown) { markdown = unfence(markdown); nodeId = nodeId || markdown.match(/^id:\s*(\S+)/m)?.[1]; }
+
+    if (markdown) {
+      if (!nodeId) throw new OpError('Markdown 문서에 id가 없어요');
+      const node = await this.store.get('node', nodeId);
+      if (!node || node.deleted) throw new OpError('Markdown 문서의 대상 노드를 찾을 수 없어요');
+      if (teamId && node.teamId && node.teamId !== teamId) throw Object.assign(new OpError('다른 팀의 문서예요'), { status: 403 });
+      teamId = node.teamId || teamId;
     }
-    if (!planJson) planJson = heuristicPlan(promptDoc.text, { attachment: att, nodes: ctx.nodes, role });
+    const role = await roleFor(this.store, user, teamId);
 
-    let ops = hydrateOps(Array.isArray(planJson.ops) ? planJson.ops : [], att);
-    const ctxOpts = { user, teamId, role, macros: MACROS, now };
+    if (ops) {
+      source = 'user-ai';
+      planJson = typeof ops === 'string' ? parsePlanText(ops) : { ops, summary };
+      planJson.intent = 'build';
+    } else if (markdown) {
+      source = 'markdown';
+      const node = await this.store.get('node', nodeId);
+      const r = await markdownToOps(this.store, nodeId, markdown);
+      warnings = r.warnings;
+      planJson = { intent: 'build', summary: summary || `"${node.title}" 문서 편집 반영`, ops: r.ops };
+      if (!r.ops.length) planJson.reply = '바뀐 내용이 없어요.';
+    } else {
+      planJson = heuristicPlan(t, { attachment: att, nodes: await nodeSummaries(this.store, teamId), role });
+    }
+
+    const promptDoc = {
+      id: newId('pr'), userId: user?.id || null, teamId, text: maskSecrets(source === 'rules' ? t : (summary || planJson.summary || t.slice(0, 200))).text.slice(0, 4000), origin, status: 'planning',
+      attachment: att ? att.slice(0, 400000) : null, selection, nodeId,
+    };
+    const opsList = hydrateOps(Array.isArray(planJson.ops) ? planJson.ops : [], att);
     let preview = null;
     let error = null;
-    if (ops.length) {
-      try {
-        preview = await executePlan(this.store, ops, { mode: 'preview', ...ctxOpts });
-      } catch (e) {
-        if (!(e instanceof OpError)) throw e;
-        error = e;
-        if (meta.provider !== 'heuristic') {
-          try {
-            const note = `The server rejected op #${e.index ?? '?'} (${JSON.stringify(e.op || {}).slice(0, 300)}): ${e.message}. Return the corrected full JSON plan.`;
-            const r = await this.llmPlan(system, userContent, note, rawText);
-            meta.tokensIn += r.usage.in; meta.tokensOut += r.usage.out;
-            planJson = r.json;
-            ops = hydrateOps(planJson.ops || [], att);
-            preview = await executePlan(this.store, ops, { mode: 'preview', ...ctxOpts });
-            error = null;
-          } catch (e2) {
-            error = e2 instanceof OpError ? e2 : error;
-          }
-        }
-      }
+    const t0 = Date.now();
+    if (opsList.length) {
+      try { preview = await executePlan(this.store, opsList, { mode: 'preview', user, teamId, role, macros: MACROS, now }); } catch (e) { if (!(e instanceof OpError)) throw e; error = e; }
     }
-    meta.latencyMs = Date.now() - t0;
     Object.assign(promptDoc, {
-      intent: planJson.intent || (ops.length ? 'build' : 'ask'),
-      status: error ? 'failed' : ops.length ? 'planned' : 'answered',
-      plan: { summary: planJson.summary || '', reply: planJson.reply || '', ops: ops.map(stripBulky), diff: preview?.diff || [], destructive: preview?.destructive || false, notes: preview?.notes || [] },
-      opsFull: ops,
+      intent: planJson.intent || (opsList.length ? 'build' : 'ask'),
+      status: error ? 'failed' : opsList.length ? 'planned' : 'answered',
+      plan: { summary: planJson.summary || summary || '', reply: planJson.reply || '', ops: opsList.map(stripBulky), diff: preview?.diff || [], destructive: preview?.destructive || false, notes: [...warnings, ...(preview?.notes || [])] },
+      opsFull: opsList,
       error: error ? { message: error.message, index: error.index } : null,
-      warning,
-      ...meta,
+      provider: source, model: null, tokensIn: 0, tokensOut: 0, latencyMs: Date.now() - t0,
     });
     await this.store.put('prompt', promptDoc);
 
@@ -177,35 +150,24 @@ export class Orchestrator {
     return publicPrompt(promptDoc);
   }
 
-  async apply({ user, promptId, now = new Date() }) {
+  async apply({ user, promptId, now = new Date(), confirmDestructive = true }) {
     const p = await this.store.get('prompt', promptId);
     if (!p) throw Object.assign(new OpError('prompt not found'), { status: 404 });
     if (p.status !== 'planned') throw new OpError(`이미 처리된 계획이에요 (${p.status})`);
-    if (p.userId && user && p.userId !== user.id && !user.isAdmin) {
-      const role = await roleFor(this.store, user, p.teamId);
-      if (role === 'member') throw Object.assign(new OpError('다른 사람의 계획은 PM만 적용할 수 있어요'), { status: 403 });
-    }
+    if (p.plan?.destructive && !confirmDestructive) throw new OpError('삭제나 구조 변경이 포함된 계획이라 확인(confirm_destructive=true)이 필요해요');
     const role = await roleFor(this.store, user, p.teamId);
+    if (p.userId && user && p.userId !== user.id && role === 'member') throw Object.assign(new OpError('다른 사람의 계획은 PM만 적용할 수 있어요'), { status: 403 });
     const res = await executePlan(this.store, p.opsFull || p.plan.ops, { mode: 'apply', user, teamId: p.teamId, role, macros: MACROS, now });
-    const entry = { id: newId('op'), promptId: p.id, userId: user?.id || null, teamId: p.teamId || res.results.find((r) => r.teamId)?.teamId || null, summary: p.plan.summary, diff: res.diff, before: res.before, after: res.after, revertedAt: null };
+    const entry = { id: newId('op'), promptId: p.id, userId: user?.id || null, teamId: p.teamId || res.results.find((r) => r.teamId)?.teamId || null, summary: p.plan.summary || p.text, source: p.provider, diff: res.diff, before: res.before, after: res.after, revertedAt: null };
     await this.store.put('oplog', entry);
     p.status = 'applied';
     p.oplogId = entry.id;
     p.appliedAt = new Date().toISOString();
     p.teamId = p.teamId || entry.teamId;
-    delete p.opsFull; // keep storage small; oplog has the images
+    delete p.opsFull;
     await this.store.put('prompt', p);
-    for (const pi of res.pendingIngest || []) {
-      this.followUp({ user, teamId: entry.teamId, ingest: pi }).catch((e) => this.log(`[followup] ${e.message}`));
-    }
-    this.notify({ type: 'applied', teamId: entry.teamId, user, summary: p.plan.summary }).catch(() => {});
+    this.notify({ type: 'applied', teamId: entry.teamId, user, summary: entry.summary }).catch(() => {});
     return { ...publicPrompt(p), results: res.results, created: res.created };
-  }
-
-  async followUp({ user, teamId, ingest }) {
-    if (!this.providers.length) return null;
-    const text = `다음은 방금 가져온 ${ingest.kind} 내용이에요. 프로젝트 구조에 반영할 후속 작업을 제안해 주세요.\n\n${ingest.text}`;
-    return this.plan({ user, teamId, text, origin: 'followup', system: `${SYSTEM_PROMPT}\n\n${followUpPrompt(ingest.kind)}`, selection: { nodeId: ingest.nodeId } });
   }
 
   async applyDirect({ user, teamId, ops, summary = '직접 편집', now = new Date() }) {
@@ -237,6 +199,9 @@ export class Orchestrator {
 function stripBulky(op) {
   const o = { ...op };
   for (const k of ['html', 'markdown', 'sourceText', 'text']) if (typeof o[k] === 'string' && o[k].length > 400) o[k] = `${o[k].slice(0, 400)}… (${o[k].length}자)`;
+  if (Array.isArray(o.content) && o.content.length > 8) o.content = `[${o.content.length}개 블록]`;
+  if (o.tree) o.tree = `[노션 트리: ${o.tree.title}]`;
+  if (o.images) o.images = `[이미지 ${o.images.length}개]`;
   return o;
 }
 

@@ -1,5 +1,5 @@
-// Rule-based planner: last-resort fallback when every free LLM is rate-limited or unset.
-// Covers the core club workflows so the app never becomes unusable.
+// Rule-based quick commands (no AI). Covers the core club workflows directly on the server;
+// anything smarter is done by the user's own AI via Markdown or operation JSON.
 
 const has = (s, re) => re.test(s);
 
@@ -48,7 +48,7 @@ export function heuristicPlan(text, context = {}) {
     if (col) return { intent: 'build', summary: `${col.title}에 ${type} 뷰를 추가해요`, ops: [{ op: 'create_view', collection: col.id, view: { type } }] };
   }
   if (has(t, /\?$|뭐야|어때|알려줘|누가|몇|현황/)) {
-    return { intent: 'ask', summary: '질문', reply: 'AI 프로바이더가 지금 응답하지 않아서 질문에는 답할 수 없어요. 잠시 후 다시 시도해 주세요. (활동 기록, 주간보고서 초안, 팀 생성, 필드/뷰 추가는 오프라인으로도 처리돼요)', ops: [] };
+    return { intent: 'ask', summary: '질문', reply: 'Shapeshift에는 내장 AI가 없어요. 질문은 개인 AI에게 맡겨 주세요: "내 AI에게 맡기기"로 자료를 복사하거나, Aside 같은 AI 브라우저에서 이 페이지의 "AI용 보기"를 열어 물어보면 돼요. (활동 기록, 주간보고서 초안, 팀 생성, 필드/뷰 추가는 빠른 명령으로 바로 처리돼요)', ops: [] };
   }
   const tags = [];
   if (/풀었|풀이|문제/.test(t)) tags.push('문제풀이');

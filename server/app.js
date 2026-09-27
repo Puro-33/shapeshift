@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Router, HttpError, readBody, send, APP_CSP, MIME, SECURITY_HEADERS } from './http.js';
 import { Auth, sessionCookie, clearCookie } from './auth.js';
 import { Orchestrator, roleFor, publicPrompt } from './ai/orchestrator.js';
-import { makeProviders } from './ai/providers.js';
+import { registerAgentRoutes } from './agent.js';
 import { OpError } from './core/ops.js';
 import { newId } from './core/model.js';
 import { validateNode, exportNodeHtml } from './services/reports.js';
@@ -17,9 +17,9 @@ import { fetchNotionTree } from './services/notion.js';
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
 const ROLE_RANK = { member: 1, pm: 2, admin: 3 };
 
-export function createApp({ store, env = process.env, providers = makeProviders(env), log = console.log }) {
+export function createApp({ store, env = process.env, log = console.log }) {
   const auth = new Auth(store, env);
-  const orch = new Orchestrator({ store, providers, log, notify: makeNotifier(store, log) });
+  const orch = new Orchestrator({ store, log, notify: makeNotifier(store, log) });
   const r = new Router();
   const secure = env.NODE_ENV === 'production' || Boolean(env.RENDER);
 
@@ -44,7 +44,7 @@ export function createApp({ store, env = process.env, providers = makeProviders(
   };
 
   // ---- health / auth ---------------------------------------------------
-  r.get('/api/health', async () => ({ ok: true, time: new Date().toISOString(), providers: providers.map((p) => p.name), store: (await store.usage().catch(() => ({}))).backend }));
+  r.get('/api/health', async () => ({ ok: true, time: new Date().toISOString(), ai: 'bring-your-own', store: (await store.usage().catch(() => ({}))).backend }));
 
   r.post('/api/auth/register', async (ctx) => {
     const user = await auth.register(ctx.body);
@@ -65,14 +65,14 @@ export function createApp({ store, env = process.env, providers = makeProviders(
   });
 
   r.get('/api/me', async (ctx) => {
-    if (!ctx.user) return { user: null, providers: providers.map((p) => p.name) };
+    if (!ctx.user) return { user: null };
     const memberships = ctx.user.isAdmin ? (await store.list('team', {})).map((t) => ({ teamId: t.id, role: 'admin' })) : await store.list('membership', { userId: ctx.user.id });
     const teams = [];
     for (const m of memberships) {
       const t = await store.get('team', m.teamId);
       if (t) teams.push({ id: t.id, name: t.name, projectTitle: t.projectTitle, role: m.role });
     }
-    return { user: publicUser(ctx.user), teams, providers: providers.map((p) => ({ name: p.name, model: p.model })) };
+    return { user: publicUser(ctx.user), teams, agent: { guide: '/agent', llms: '/llms.txt', mcp: '/mcp' } };
   });
 
   r.post('/api/invites/join', async (ctx) => {
@@ -156,10 +156,10 @@ export function createApp({ store, env = process.env, providers = makeProviders(
   // ---- prompts ---------------------------------------------------------
   r.post('/api/prompts', async (ctx) => {
     const user = requireUser(ctx);
-    const { teamId, text, attachment, selection } = ctx.body;
+    const { teamId, text, attachment, selection, ops, markdown, nodeId, summary } = ctx.body;
     if (teamId) await requireTeam(ctx, teamId);
-    if (!String(text || '').trim() && !attachment) throw new HttpError(400, '프롬프트를 입력해 주세요');
-    return orch.plan({ user, teamId: teamId || null, text: String(text || ''), attachment: attachment ? String(attachment) : null, selection });
+    if (!String(text || '').trim() && !attachment && !ops && !markdown) throw new HttpError(400, '명령, ops JSON, 또는 Markdown 중 하나가 필요해요');
+    return orch.plan({ user, teamId: teamId || null, text: String(text || ''), attachment: attachment ? String(attachment) : null, selection, ops: ops || null, markdown: markdown || null, nodeId: nodeId || null, summary: summary || '' });
   }, { bodyLimit: 6 * 1024 * 1024 });
 
   r.get('/api/prompts', async (ctx) => {
@@ -317,15 +317,9 @@ export function createApp({ store, env = process.env, providers = makeProviders(
     const op = { op: 'ingest_content', kind, title, source: source || (user.isToken ? `api:${user.name}` : 'api'), ...(format === 'html' ? { html: content } : format === 'json' ? { text: content } : { markdown: content }) };
     if (kind === 'prowler') { delete op.html; delete op.markdown; op.text = content; }
     const res = await orch.applyDirect({ user, teamId, ops: [op], summary: text });
-    const pending = [];
-    if (kind !== 'prowler' && res.results[0]?.id) {
-      const nodeNow = await store.get('node', res.results[0].id);
-      if (nodeNow && kind !== 'article') {
-        pending.push(orch.followUp({ user, teamId, ingest: { nodeId: nodeNow.id, kind, text: (nodeNow.content || []).map((b) => b.text || '').join('\n').slice(0, 12000) } }).catch((e) => ({ error: e.message })));
-      }
-    }
-    const follow = ctx.query.get('wait') === '1' ? await Promise.all(pending) : [];
-    return { ok: true, oplogId: res.oplogId, result: res.results[0], notes: res.notes, followUps: follow.map((f) => f?.id || f?.error).filter(Boolean) };
+    const id = res.results[0]?.id;
+    // No server AI: the node is ready for the user's own AI to read (/p/{id}.md) and propose follow-ups.
+    return { ok: true, oplogId: res.oplogId, result: res.results[0], notes: res.notes, read: id ? { html: `/p/${id}`, markdown: `/p/${id}.md` } : null };
   }, { bodyLimit: 6 * 1024 * 1024 });
 
   r.post('/api/tokens', async (ctx) => {
@@ -361,16 +355,19 @@ export function createApp({ store, env = process.env, providers = makeProviders(
     return runReminders(store, { baseUrl: env.PUBLIC_URL || '' });
   });
 
+  registerAgentRoutes(r, { store, orch, auth, env, requireUser, requireTeam, nodeAccess });
+
   // ---- request handler -------------------------------------------------
   return async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const cookies = [];
     try {
-      if (url.pathname.startsWith('/api/')) {
-        const route = r.match(req.method, url.pathname);
+      const route = r.match(req.method, url.pathname);
+      if (url.pathname.startsWith('/api/') || route) {
         if (!route) throw new HttpError(404, 'API 경로를 찾을 수 없어요');
-        if (req.method !== 'GET' && !req.headers.authorization?.startsWith('Bearer ') && url.pathname !== '/api/cron/tick') {
-          // CSRF: browsers can't send this header cross-site without CORS preflight (which we never allow)
+        if (url.pathname.startsWith('/api/') && req.method !== 'GET' && !req.headers.authorization?.startsWith('Bearer ') && url.pathname !== '/api/cron/tick') {
+          // CSRF: browsers can't send this header cross-site without CORS preflight (which we never allow).
+          // Non-/api form routes check a per-session CSRF token instead.
           if (req.headers['x-shapeshift'] !== '1') throw new HttpError(403, 'CSRF 헤더가 없어요');
         }
         const body = req.method === 'GET' ? {} : await readBody(req, route.opts.bodyLimit);
@@ -378,7 +375,8 @@ export function createApp({ store, env = process.env, providers = makeProviders(
         const ctx = { req, res, params: route.params, query: url.searchParams, body, user, setCookie: (c) => cookies.push(c) };
         const out = await route.handler(ctx);
         const extra = cookies.length ? { 'set-cookie': cookies } : {};
-        if (out && out.raw !== undefined) return send(res, 200, out.raw, { ...out.headers, ...extra });
+        if (out && out.redirect) { res.writeHead(303, { location: out.redirect, ...extra }); return res.end(); }
+        if (out && out.raw !== undefined) return send(res, out.status || 200, out.raw, { ...out.headers, ...extra });
         return send(res, 200, out ?? { ok: true }, extra);
       }
       return serveStatic(url.pathname, res);

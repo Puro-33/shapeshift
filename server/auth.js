@@ -76,10 +76,15 @@ export class Auth {
   async userFromRequest(req) {
     const authz = req.headers.authorization || '';
     if (authz.startsWith('Bearer ss_')) {
-      const tok = await this.store.get('apitoken', sha256(authz.slice(7)));
+      const tok = await this.store.get('apitoken', sha256(authz.slice(7).trim()));
       if (!tok || tok.revoked) return null;
       tok.lastUsedAt = new Date().toISOString();
       await this.store.put('apitoken', tok);
+      if (tok.kind === 'personal') {
+        // Personal AI acts as the user (same roles), so it can read and edit everything the user can.
+        const user = await this.store.get('user', tok.userId);
+        return user ? { ...user, viaToken: tok.name || 'personal' } : null;
+      }
       return { id: `token:${tok.id}`, name: tok.name || 'API', isToken: true, tokenTeamId: tok.teamId };
     }
     const token = parseCookies(req.headers.cookie)[COOKIE];
@@ -114,6 +119,13 @@ export class Auth {
     invite.uses += 1;
     await this.store.put('invite', invite);
     return team;
+  }
+
+  async createPersonalToken(userId, name) {
+    const token = `ss_${crypto.randomBytes(24).toString('base64url')}`;
+    const doc = { id: sha256(token), kind: 'personal', userId, teamId: null, name: name || 'my-ai', createdBy: userId, revoked: false, prefix: token.slice(0, 7) };
+    await this.store.put('apitoken', doc);
+    return { token, id: doc.id };
   }
 
   async createApiToken(teamId, name, createdBy) {

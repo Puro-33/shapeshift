@@ -9,6 +9,7 @@ import { validateNode, exportNodeHtml, sectionBullets } from '../server/services
 import { findSys, fieldByName } from '../server/services/teams.js';
 import { htmlToBlocks, maskSecrets, parseProwler } from '../server/services/ingest.js';
 import { fetchNotionTree } from '../server/services/notion.js';
+import { nodeToMarkdown, splitFrontMatter } from '../server/core/markdown.js';
 import { SSG_GUIDE, REPORT_1_MD, ARTICLE_HTML, PROWLER_OCSF_1, PROWLER_OCSF_2 } from './fixtures.js';
 
 const admin = { id: 'u_admin', name: '운영진', isAdmin: true };
@@ -19,7 +20,7 @@ const NOW = new Date('2026-09-25T03:00:00Z'); // 2026-09-25 KST, inside 2차 per
 async function setup() {
   const store = new MemoryStore();
   for (const u of [admin, pm, jh]) await store.put('user', { ...u, email: `${u.id}@x.io` });
-  const orch = new Orchestrator({ store, providers: [], log: () => {} });
+  const orch = new Orchestrator({ store, log: () => {} });
   await orch.applyDirect({ user: admin, teamId: null, ops: [{ op: 'create_season', sourceText: SSG_GUIDE, year: 2026 }], now: NOW });
   const res = await orch.applyDirect({
     user: pm, teamId: null, now: NOW,
@@ -191,7 +192,7 @@ test('G8 heuristic fallback plans + applies without any LLM', async () => {
   const { store, orch, teamId } = await setup();
   const p = await orch.plan({ user: jh, teamId, text: '오늘 iam_privesc_by_rollback 풀었고 prowler로 rollback 문제 점검해봄. 컨테이너 개념도 좀 봄', now: NOW });
   assert.equal(p.status, 'planned');
-  assert.equal(p.provider, 'heuristic');
+  assert.equal(p.provider, 'rules');
   assert.ok(p.plan.diff.length >= 2);
   const before = (await store.list('node', { teamId })).length;
   assert.equal((await store.list('node', { teamId })).length, before, 'preview must not persist');
@@ -206,26 +207,70 @@ test('G8 heuristic fallback plans + applies without any LLM', async () => {
   assert.equal(w.plan.ops[0].round, 2);
 });
 
-test('LLM path: 429 falls back to next provider; invalid op triggers one corrective retry', async () => {
+test('BYO-AI: plan JSON from a personal AI is validated, previewed, applied', async () => {
   const { store, teamId } = await setup();
-  const calls = [];
-  const pacer = () => ({ until: 0, wait: async () => {}, coolDown(ms) { this.until = Date.now() + ms; }, get cooling() { return Date.now() < this.until; } });
-  const mk = (name, fn) => ({ name, model: 'm', pacer: pacer(), complete: async (req) => { calls.push(name); return fn(req); } });
-  const limited = mk('gemini', async () => { const e = new Error('429'); e.status = 429; throw e; });
-  let n = 0;
-  const ok = mk('groq', async () => {
-    n++;
-    const ops = n === 1
-      ? [{ op: 'add_field', collection: 'NoSuchCollection', field: { name: '예상 시간', type: 'number' } }]
-      : [{ op: 'add_field', collection: '태스크', field: { name: '예상 시간', type: 'number' } }];
-    return { text: JSON.stringify({ intent: 'build', summary: '태스크에 예상 시간 필드 추가', ops }), usage: { in: 100, out: 20 } };
-  });
-  const orch = new Orchestrator({ store, providers: [limited, ok], log: () => {} });
-  const p = await orch.plan({ user: pm, teamId, text: '태스크에 예상 시간 숫자 필드 추가해줘', now: NOW });
+  const orch = new Orchestrator({ store, log: () => {} });
+  const bad = await orch.plan({ user: pm, teamId, text: '```json\n{"summary":"x","ops":[{"op":"add_field","collection":"NoSuchCollection","field":{"name":"예상 시간","type":"number"}}]}\n```', now: NOW });
+  assert.equal(bad.status, 'failed');
+  assert.equal(bad.provider, 'user-ai');
+  assert.match(bad.error.message, /not found/);
+  const good = await orch.plan({ user: pm, teamId, ops: [{ op: 'add_field', collection: '태스크', field: { name: '예상 시간', type: 'number' } }], summary: '태스크에 예상 시간', now: NOW });
+  assert.equal(good.status, 'planned');
+  assert.ok(good.plan.diff.some((d) => d.changes?.some((c) => c.includes('예상 시간'))));
+  const tasks = await findSys(store, teamId, 'tasks');
+  assert.ok(!fieldByName(await store.get('node', tasks.id), '예상 시간'), 'preview must not persist');
+  await orch.apply({ user: pm, promptId: good.id, now: NOW });
+  assert.ok(fieldByName(await store.get('node', tasks.id), '예상 시간'));
+});
+
+test('BYO-AI: Markdown round-trip edits properties, body, and keeps HTML reports', async () => {
+  const { store, orch, teamId } = await setup();
+  const col = await findSys(store, teamId, 'deliverables');
+  const r1 = (await store.list('node', { parentId: col.id })).find((i) => i.title === '1차 주간보고서');
+  await orch.applyDirect({ user: pm, teamId, now: NOW, ops: [{ op: 'set_content', node: r1.id, content: [{ type: 'h2', text: '핵심 인사이트' }, { type: 'bullet', text: 'A' }, { type: 'html', id: 'b_rep', title: 'prowler.html', html: '<h1>scan</h1>' }] }] });
+  const node = await store.get('node', r1.id);
+  const md = nodeToMarkdown(node, { parent: col });
+  const { meta } = splitFrontMatter(md);
+  assert.equal(meta.id, r1.id);
+  assert.equal(meta.properties['종류'], '주간보고');
+  assert.match(md, /shapeshift:html id="b_rep"/);
+  const edited = md.replace('상태: 시작 전', '상태: 진행 중').replace('- A', '- A\n- Prowler로 IAM 설정 오류 탐지 확인');
+  const p = await orch.plan({ user: jh, teamId, text: edited, now: NOW });
+  assert.equal(p.provider, 'markdown');
   assert.equal(p.status, 'planned', JSON.stringify(p.error));
-  assert.equal(p.provider, 'groq');
-  assert.deepEqual(calls, ['gemini', 'groq', 'groq']);
-  assert.ok(p.plan.diff.some((d) => d.changes?.some((c) => c.includes('예상 시간'))));
+  await orch.apply({ user: jh, promptId: p.id, now: NOW });
+  const after = await store.get('node', r1.id);
+  assert.equal(after.props[fieldByName(col, '상태').id], '진행 중');
+  assert.ok(after.content.some((b) => b.text === 'Prowler로 IAM 설정 오류 탐지 확인'));
+  const rep = after.content.find((b) => b.type === 'html');
+  assert.equal(rep.id, 'b_rep');
+  assert.equal(rep.html, '<h1>scan</h1>');
+  const same = await orch.plan({ user: jh, teamId, markdown: nodeToMarkdown(after, { parent: col }), nodeId: after.id, now: NOW });
+  assert.equal(same.status, 'answered', JSON.stringify(same.plan));
+});
+
+test('BYO-AI: collection Markdown table updates rows and adds new ones', async () => {
+  const { store, orch, teamId } = await setup();
+  const tasks = await findSys(store, teamId, 'tasks');
+  await orch.applyDirect({ user: pm, teamId, now: NOW, ops: [{ op: 'upsert_item', collection: tasks.id, title: 'Prowler 기능 분석', values: { 상태: '할 일', 담당: ['김성주'] } }] });
+  const col = await store.get('node', tasks.id);
+  const items = (await store.list('node', { parentId: col.id })).filter((n) => !n.deleted);
+  let md = nodeToMarkdown(col, { children: items });
+  assert.match(md, /\| id \| 이름 \| 상태 \| 담당 \| 단계 \| 마감 \|/);
+  md = md.replace(/(\| Prowler 기능 분석 \| )할 일/, '$1진행 중');
+  md = md.trimEnd() + '\n|  | CloudGoat medium 2문제 | 할 일 | 김원준 | 2단계 | 2026-10-04 |\n';
+  md = md.replace(/fields:\n/, 'fields:\n  예상 시간: number\n');
+  const p = await orch.plan({ user: pm, teamId, markdown: md, nodeId: col.id, now: NOW });
+  assert.equal(p.status, 'planned', JSON.stringify(p.error));
+  await orch.apply({ user: pm, promptId: p.id, now: NOW });
+  const col2 = await store.get('node', col.id);
+  assert.ok(fieldByName(col2, '예상 시간'));
+  const after = (await store.list('node', { parentId: col.id })).filter((n) => !n.deleted);
+  assert.equal(after.length, 2);
+  assert.equal(after.find((i) => i.title === 'Prowler 기능 분석').props[fieldByName(col2, '상태').id], '진행 중');
+  const nw = after.find((i) => i.title === 'CloudGoat medium 2문제');
+  assert.deepEqual(nw.props[fieldByName(col2, '담당').id], ['김원준']);
+  assert.equal(nw.props[fieldByName(col2, '마감').id], '2026-10-04');
 });
 
 test('G6 Notion import merges 산출물 and infers missing 종류/차수, flags duplicates', async () => {

@@ -87,10 +87,10 @@ function Table({ col, rows, setValue, addItem, members, onChanged }) {
   const app = useApp();
   const fields = col.fields || [];
   const rename = async (it, title) => { if (title && title !== it.title) { await app.runOps([{ op: 'update_node', node: it.id, title }], '제목 변경'); onChanged(); } };
-  return html`<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>이름</th>${fields.map((f) => html`<th title=${FIELD_TYPE_LABELS[f.type]}>${f.name}</th>`)}</tr></thead>
+  return html`<div class="tbl-wrap"><table class="tbl" data-collection-id=${col.id}>
+    <thead><tr><th data-field-name="이름" data-field-type="title">이름</th>${fields.map((f) => html`<th title=${FIELD_TYPE_LABELS[f.type]} data-field-name=${f.name} data-field-type=${f.type}>${f.name}</th>`)}</tr></thead>
     <tbody>
-      ${rows.map((it) => html`<tr>
+      ${rows.map((it) => html`<tr data-item-id=${it.id}>
         <td class="tt"><div class="row" style="gap:0">
           <input class="cellin" style="font-weight:550" value=${it.title} onBlur=${(e) => rename(it, e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && e.target.blur()} />
           <a href=${`#/t/${app.teamId}/n/${it.id}`} title="열기" style="padding:4px 8px">↗</a>

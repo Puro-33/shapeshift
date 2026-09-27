@@ -1,6 +1,7 @@
 # SPEC: Shapeshift (가칭) : 프롬프트로 구조가 자라는 동아리 팀 프로젝트 워크스페이스
 
-> 상태: v0.3 (SSG 노션 구조 분석 반영 + 전부 무료 스택으로 변경, 구현 착수 승인 대기)
+> 상태: v0.4 (서버 AI 제거, 개인 AI 친화 설계로 전환. §16 참고)
+> 이전: v0.3 (SSG 노션 구조 분석 반영 + 전부 무료 스택으로 변경, 구현 착수 승인 대기)
 > 작성일: 2026-09-26
 > 결정: 새 레포(가칭 `Puro-33/shapeshift`) / 범위 M1~M6 전체 / **전 구성요소 무료, 사용 기한 만료형 무료 티어 금지(사용량·시간 제한형만 허용)**
 
@@ -387,3 +388,36 @@ LLM 비결정성 대응: Operation 스키마 통과율과 기대 노드/필드 �
 3. **Gemini API 키**(Google AI Studio, 무료) + **Groq API 키**(무료).
 4. **Discord 웹훅 URL**: 팀 채널 (M5).
 5. **Notion Integration 토큰** + "2026 SSG 팀 프로젝트" 페이지에 integration 연결 권한 (M5, 팀 워크스페이스 권한 필요).
+
+
+---
+
+## 16. v0.4 방향 전환: 서버 AI 제거, 개인 AI 친화 설계 (2026-09-27)
+
+**결정**: 서버에 AI(LLM)를 넣지 않는다. 사용자가 각자 쓰는 AI(Aside 같은 AI 브라우저, ChatGPT/Claude/Gemini, MCP 클라이언트)가 워크스페이스를 쉽게 읽고 편집하도록 만든다. §4.3의 "AI Operation Engine"은 그대로 두되, 계획(ops)을 만드는 주체가 서버 LLM에서 사용자 AI로 바뀐다. §6의 Gemini/Groq는 쓰지 않는다.
+
+### 16.1 읽기 쉬운 형식
+| 형식 | 경로 | 설계 |
+|---|---|---|
+| 시맨틱 HTML | `/p/{id}` | 서버 렌더링, JS 없음. `[data-block-id][data-block-type]`, `table[data-collection-id] th[data-field-name][data-field-type] tr[data-item-id]`, `dl#properties`, `section#rule-checks`, `script#shapeshift-node`(JSON) |
+| Markdown | `/p/{id}.md` | YAML front matter(id, type, properties/fields) + 본문. DB는 `id \| 이름 \| 필드...` 표. HTML 리포트는 `<!-- shapeshift:html id=... -->` 자리표시로 보존 |
+| 개요 | `/t/{teamId}.md` | 팀, 일정, 동아리 규칙, 전체 트리(id, 필드) |
+| 안내 | `/agent`, `/llms.txt` | AI용 사용 설명서, Operation 레퍼런스 |
+
+### 16.2 편집 경로 (모두 미리보기 → 적용 → Undo)
+1. Markdown 왕복: 수정한 문서 → 서버가 차이를 ops로 변환 (`form#edit-markdown`, `POST /api/nodes/{id}/markdown`)
+2. Operation JSON: `{"summary","ops"}` (`form#submit-ops`, `POST /api/prompts`, 붙여넣기 자동 감지)
+3. MCP: `POST /mcp` JSON-RPC, 개인 토큰(사용자와 같은 권한), 도구 10개, 파괴적 변경은 `confirm_destructive`
+4. 채팅 AI: "내 AI에게" 버튼이 요청 + 개요 + 현재 문서 + 규칙 패키지를 복사 → 답을 붙여넣기
+5. 빠른 명령: AI 없이 서버 규칙으로 처리(활동 기록, 주간보고서 초안, 필드/뷰 추가, 팀 생성, 가져오기)
+
+### 16.3 안전장치
+- HTML 폼은 세션별 CSRF 토큰, API는 커스텀 헤더, MCP는 Bearer 전용
+- 행 삭제/필드 삭제는 Markdown으로 하지 않음(표에서 빠져도 삭제 안 함). 삭제는 명시적 op + 사람 확인
+- 수용 테스트: 골든 14개(Markdown 왕복, JSON 계획 검증 포함), HTTP 스모크 42개(폼 CSRF, MCP 포함)
+
+### 16.4 결정 로그 추가
+| 날짜 | 항목 | 결정 |
+|---|---|---|
+| 2026-09-27 | AI | 서버 LLM(Gemini/Groq) 제거 → 사용자 개인 AI (BYO-AI) |
+| 2026-09-27 | 인터페이스 | AI용 시맨틱 HTML/Markdown/JSON 뷰, 폼 편집, MCP 추가 |

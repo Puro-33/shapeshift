@@ -205,7 +205,7 @@ export function BlockEditor({ nodeId, blocks: initial, onChange, readOnly = fals
 
   return html`<div class="blocks" style="position:relative">
     ${blocks.map((b, i) => {
-      const common = { key: b.id };
+      const common = { key: b.id, 'data-block-id': b.id, 'data-block-type': b.type };
       const handle = readOnly ? null : html`<button class="handle" title="블록 삭제" onClick=${() => remove(i)}>⋮</button>`;
       if (b.type === 'divider') return html`<div class="blk" ...${common}>${handle}<hr /></div>`;
       if (b.type === 'image') return html`<div class="blk" ...${common}>${handle}<img src=${b.src} alt=${b.caption || ''} />${b.caption ? html`<div class="small faint">${b.caption}</div>` : null}</div>`;

@@ -37,6 +37,7 @@ export async function readBody(req, limit = 2 * 1024 * 1024) {
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf8');
       if (!raw) return resolve({});
+      if (/application\/x-www-form-urlencoded/i.test(req.headers['content-type'] || '')) return resolve(Object.fromEntries(new URLSearchParams(raw)));
       try { resolve(JSON.parse(raw)); } catch { reject(new HttpError(400, 'JSON 본문이 올바르지 않아요')); }
     });
     req.on('error', reject);

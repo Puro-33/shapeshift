@@ -185,7 +185,7 @@ function App() {
           ${me.user.isAdmin ? html`<div class="side-sec"><div class="side-label">운영</div><div class="nav ${route.name === 'admin' ? 'active' : ''}" onClick=${() => go('#/admin')}><span class="ic">🛡️</span>운영진 대시보드</div></div>` : null}
         </div>
         <div class="side-foot"><span class="grow">${me.user.name}${me.user.isAdmin ? ' · 운영진' : td?.role === 'pm' ? ' · PM' : ''}</span>
-          <span title=${(me.providers || []).map((p) => p.name || p).join(' → ') || 'AI 키 없음: 규칙 기반 플래너 사용'} class="small">${(me.providers || []).length ? '🤖' : '⚙️'}</span>
+          <a class="small" href="/agent" target="_blank" rel="noopener" title="내장 AI 없음. 개인 AI가 읽고 편집하는 방법">🤖 내 AI 연결</a>
           <button class="btn sm ghost" onClick=${logout}>로그아웃</button></div>
       </aside>
       <main class="main">

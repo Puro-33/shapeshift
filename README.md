@@ -1,71 +1,74 @@
 # Shapeshift
 
-**프롬프트로 구조가 자라는 팀 프로젝트 워크스페이스.** 노션의 페이지/DB/뷰 모델을 그대로 쓰되, 구조를 사람이 만들지 않아요.
-운영 안내문을 넣으면 시즌 일정과 규칙이 생기고, 팀원이 한 일을 말하면 활동 로그가 쌓이고, 주간보고서는 그 기록으로 자동 작성돼요.
-SSG 동아리 팀 프로젝트(주간보고서, SSG HUB 아티클, 발표자료)를 1순위 사용처로 설계했어요. 전체 스펙은 [`docs/SPEC.md`](docs/SPEC.md)에 있어요.
+**AI가 읽고 쓰기 쉬운 팀 프로젝트 워크스페이스.** 노션의 페이지/DB/뷰 모델을 쓰되, 서버에 AI를 넣지 않았어요.
+대신 각자 쓰는 AI(Aside 같은 AI 브라우저, ChatGPT/Claude/Gemini, MCP 클라이언트)가 워크스페이스를 **읽기 쉽고 편집하기 쉽게** 만들었어요.
+SSG 동아리 팀 프로젝트(주간보고서, SSG HUB 아티클, 발표자료)를 1순위 사용처로 설계했어요. 스펙은 [`docs/SPEC.md`](docs/SPEC.md).
 
-## 무엇이 되나
+## 왜 서버에 AI가 없나
+- 비용 0원, API 키 관리 없음, 팀 데이터가 제3의 AI 서버로 가지 않음
+- 각자 이미 쓰는 AI가 더 똑똑하고, 사용자의 맥락을 알고 있음
+- 서버는 **검증, 미리보기(diff), 적용, 되돌리기, 규칙 검사**만 책임짐
 
-| 하고 싶은 것 | 이렇게 말하면 돼요 |
-|---|---|
-| 시즌 만들기 (운영진) | 운영진 대시보드에 "SSG 팀 프로젝트 안내" 전문 붙여넣기 → 1~10차 마감, 시험기간, 최소 요구사항, 파일명 규칙 자동 생성 |
-| 팀/프로젝트 구조 | "DevSecOps 보안 스캐너 팀 만들어줘. 팀명 ○○, PM 김성주, 팀원 김원준 변정현 차정훈" |
-| 구조 변경 | "태스크에 예상 시간 숫자 필드 추가", "Issues를 태스크에 합쳐서 타입으로 구분", "이 페이지를 DB로 바꿔줘" |
-| 활동 기록 | "오늘 iam_privesc_by_rollback 풀었고 prowler로 점검해봄" |
-| 주간보고서 | "2차 주간보고서 만들어줘" → 지난 차주 계획 이월, 팀원별 계획 대비 실적 표, 도움 필요(Ask), 규칙 검증, 파일명 규칙대로 HTML/PDF 내보내기 |
-| 아티클 | ChatGPT/Claude 정리글 HTML 붙여넣기 → 채팅 잡담 제거, `[팀명]` 제목, 작성자/주제 자동 |
-| Prowler | 결과(JSON-OCSF/CSV/HTML) 첨부 또는 CI에서 API로 전송 → 신규/잔존/해결 finding 추적 |
-| 질문 | "이번 주 누가 뭐 했어?" |
+## AI가 읽는 법
+| 형식 | 주소 | 용도 |
+|---|---|---|
+| 워크스페이스 개요 | `/t/{teamId}.md` | 팀, 일정, 동아리 규칙, 전체 구조(id 포함)를 한 번에 |
+| 시맨틱 HTML (JS 없음) | `/p/{id}` | AI 브라우저용. 블록/필드/행마다 `data-*` 속성, 규칙 검증 `section#rule-checks`, 편집 폼 포함 |
+| Markdown | `/p/{id}.md` | front matter(속성) + 본문, DB는 항목 표 |
+| JSON | `/p/{id}.json` | 원본 데이터 |
+| 안내 | `/agent`, `/llms.txt` | AI용 사용 설명서와 Operation 레퍼런스 |
 
-모든 AI 변경은 **미리보기(diff) → 적용 → 되돌리기**가 가능하고, 사람이 직접 한 편집도 같은 엔진을 거쳐 기록돼요.
+## AI가 편집하는 법
+1. **Markdown 왕복**: `/p/{id}.md`를 고쳐서 `/p/{id}`의 `form#edit-markdown`에 제출하거나 `POST /api/nodes/{id}/markdown`. 서버가 차이를 Operation으로 바꿔 미리보기 → 적용.
+2. **Operation JSON**: `{"summary":"...","ops":[...]}`를 `form#submit-ops` 또는 `POST /api/prompts`로. 구조 변경(필드, 뷰, 병합, 변환)에 사용.
+3. **MCP**: `POST /mcp` (JSON-RPC, 개인 토큰). 도구: list_teams, workspace_outline, read_node, search, validate, preview_ops, apply_ops, edit_markdown, quick_command, undo.
+4. **채팅 AI**: 앱의 "🤖 내 AI에게" 버튼이 요청 + 워크스페이스 개요 + 현재 문서 + 규칙을 묶어 복사해 줌. AI의 답을 그대로 붙여넣으면 미리보기.
+
+모든 경로는 같은 Operation 엔진을 거쳐요: 권한 검사 → 트랜잭션 미리보기 → 적용 → 변경 기록(Undo). 삭제나 구조 변경은 항상 사람이 확인해요.
+
+## AI 없이도 되는 것 (빠른 명령)
+"오늘 lambda_privesc 풀었어" (활동 기록), "2차 주간보고서 만들어줘" (활동 로그와 지난 차주 계획으로 초안), "태스크에 예상 시간 숫자 필드 추가", "보드 뷰로", 팀 생성, HTML/Prowler 파일 가져오기는 서버 규칙으로 바로 처리돼요.
 
 ## 구조
-
 ```
 server/
-  core/ops.js         Operation 엔진 (검증, 트랜잭션 적용, 미리보기 롤백, before-image 기반 Undo)
-  core/rules.js       규칙 엔진 (필수 섹션, [팀명] 제목, 파일명, 참여율 등)
-  ai/orchestrator.js  프롬프트 → 계획 → 미리보기 → 적용. 1 프롬프트 = LLM 1회 (+검증 실패 시 1회 재시도)
-  ai/providers.js     Gemini → Groq → OpenRouter 무료 티어 폴백, 프로바이더별 속도 제한/쿨다운
-  ai/heuristic.js     모든 LLM이 한도 초과여도 핵심 명령을 처리하는 규칙 기반 플래너
-  services/           season(안내문 파싱), teams, reports(주간보고/내보내기), ingest(HTML·비밀값·Prowler), notion, notify
-  store/              JSONB 문서 저장소: Neon Postgres 또는 로컬 JSON 파일 (같은 인터페이스)
-public/               무빌드 SPA (Preact + htm 벤더링, CDN 의존 없음)
-test/                 SSG 실데이터 기반 골든 시나리오 12개 + HTTP 스모크 21개
+  core/ops.js        Operation 엔진 (검증, 미리보기 롤백, before-image 기반 Undo)
+  core/markdown.js   노드 <-> Markdown(front matter) 변환, 편집 diff -> ops
+  core/rules.js      동아리 규칙 (필수 섹션, [팀명] 제목, 파일명, 참여율)
+  agent.js           AI용 HTML/Markdown/JSON 뷰, 폼 편집, MCP 엔드포인트
+  ai/orchestrator.js 계획(ops JSON | Markdown | 빠른 명령) -> 미리보기 -> 적용 -> 되돌리기
+  ai/heuristic.js    빠른 명령 (규칙 기반, AI 없음)
+  ai/guide.js        /agent, /llms.txt, 복사용 자료 패키지
+  services/          season, teams, reports, ingest(HTML, 비밀값, Prowler), notion, notify
+  store/             JSONB 문서 저장소 (Neon Postgres 또는 로컬 JSON)
+public/              무빌드 SPA (Preact + htm 벤더링)
+test/                골든 시나리오 14개 + HTTP 스모크 42개
 ```
-
-의존성은 `postgres` 하나뿐이에요 (HTTP, 인증, HTML 변환, LLM 호출 모두 Node 표준 기능).
+의존성은 `postgres` 하나뿐이에요.
 
 ## 로컬 실행
-
 ```bash
 npm install
-npm start                   # http://localhost:8787, DATABASE_URL이 없으면 data/dev.json 사용
-npm test                    # 골든 시나리오
+npm start        # http://localhost:8787 (DATABASE_URL 없으면 data/dev.json)
+npm test
 ```
-
-첫 가입자가 운영진(admin)이 돼요. AI 키가 없으면 규칙 기반 플래너로 동작해요.
+첫 가입자가 운영진(admin)이 돼요.
 
 ## 무료 배포 (기한 만료 없는 구성)
-
 | 구성 | 서비스 | 무료 조건 |
 |---|---|---|
 | 웹 서버 | Render Free Web Service | 15분 유휴 시 슬립(재기동 약 1분), 월 750시간 |
-| DB | Neon Free Postgres | 기한 없음, 0.5GB, 월 100 CU-시간, 한도 초과 시 데이터 삭제 없이 일시정지 |
-| LLM | Gemini API 무료 티어 → Groq 무료 티어 | 요청 수 제한만 있음 |
+| DB | Neon Free Postgres | 기한 없음, 0.5GB, 월 100 CU-시간, 한도 초과 시 삭제 없이 일시정지 |
+| AI | 없음 (사용자 개인 AI) | 0원 |
 | 스케줄/백업/CI | GitHub Actions | 공개 레포 무료 |
-| 알림 | Discord 웹훅 | 무료 (Render 무료는 SMTP 포트 차단) |
+| 알림 | Discord 웹훅 | 무료 |
 
-Render Free Postgres는 30일 뒤 만료돼서 쓰지 않아요.
+1. Neon 프로젝트 생성 → pooled 연결 문자열
+2. Render → New → Blueprint → 이 레포 → `DATABASE_URL`, `BOOTSTRAP_ADMIN_EMAIL`
+3. GitHub Secrets: `APP_URL`, `CRON_SECRET`, `DATABASE_URL` (알림/백업 워크플로)
 
-1. **Neon**: 프로젝트 생성 → *pooled* 연결 문자열 복사
-2. **Render**: New → Blueprint → 이 레포 선택 (`render.yaml`) → `DATABASE_URL`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `BOOTSTRAP_ADMIN_EMAIL` 입력
-3. **GitHub Secrets**: `APP_URL`, `CRON_SECRET`(Render에서 생성된 값), `DATABASE_URL` → 알림/백업 워크플로 활성화
-4. 앱에서 운영진 가입 → 시즌 만들기 → 팀 만들기 → 팀 설정에서 Discord 웹훅/초대 코드
-
-## 보안 메모
-
-- HTML 리포트는 `/api/render`에서 `CSP: sandbox` + iframe sandbox로 앱과 다른 불투명 origin에서 렌더돼요. 기본 모드는 스크립트 제거, 인터랙티브 모드도 네트워크(`connect-src 'none'`) 차단.
-- 저장 및 LLM 전송 전에 AWS/GitHub/HF/OpenAI/Google/Groq 키, 개인키, 비밀번호 패턴을 마스킹해요.
-- 세션 쿠키 HttpOnly + SameSite=Lax, 변경 요청은 커스텀 헤더(`x-shapeshift`) 필수(CSRF), scrypt 비밀번호 해시, API 토큰은 SHA-256 해시만 저장.
-- Gemini 무료 티어는 입력이 서비스 개선에 쓰일 수 있어요. 민감한 내용은 넣지 마세요.
+## 보안
+- HTML 리포트는 `CSP: sandbox` + iframe sandbox로 앱과 분리된 불투명 origin에서 렌더
+- 저장 전 비밀값 마스킹 (AWS, GitHub, HF, OpenAI, Google, Groq 키, 개인키, 비밀번호)
+- 세션 쿠키 HttpOnly/SameSite=Lax, API는 `x-shapeshift` 헤더, HTML 폼은 세션별 CSRF 토큰
+- 개인 토큰은 SHA-256 해시만 저장, MCP는 Bearer 토큰 전용, 파괴적 변경은 `confirm_destructive` 필요
