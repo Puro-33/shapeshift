@@ -626,9 +626,12 @@ export async function executePlan(store, ops, { mode = 'apply', ...ctxOpts } = {
 export async function revertEntry(store, entry, { force = false } = {}) {
   return store.tx(async (tx) => {
     const conflicts = [];
+    // Compare content, not timestamps: undoing a later change restores identical content with a new updatedAt.
+    const stable = (v) => (Array.isArray(v) ? `[${v.map(stable).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${stable(v[k])}`).join(',')}}` : JSON.stringify(v));
+    const sig = (d) => { if (!d) return null; const { createdAt, updatedAt, ...rest } = d; return stable(rest); };
     for (const a of entry.after || []) {
       const cur = await tx.get(a.kind, a.id);
-      if (a.doc && cur && cur.updatedAt !== a.doc.updatedAt) conflicts.push(a.doc.title || a.id);
+      if (a.doc && cur && sig(cur) !== sig(a.doc)) conflicts.push(a.doc.title || a.id);
     }
     if (conflicts.length && !force) {
       const err = new OpError(`이후에 수정된 항목이 있어요: ${conflicts.slice(0, 5).join(', ')}`);
