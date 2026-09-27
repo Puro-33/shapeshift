@@ -61,7 +61,7 @@ export function makeProviders(env = process.env) {
       },
     },
     groq: env.GROQ_API_KEY && {
-      name: 'groq', model: env.GROQ_MODEL || 'llama-3.3-70b-versatile', pacer: new Pacer(Number(env.GROQ_MIN_INTERVAL_MS || 2200)),
+      name: 'groq', model: env.GROQ_MODEL || 'openai/gpt-oss-120b', pacer: new Pacer(Number(env.GROQ_MIN_INTERVAL_MS || 2200)),
       async complete({ system, messages, maxTokens = 4096 }) {
         const data = await postJson('groq', 'https://api.groq.com/openai/v1/chat/completions', { authorization: `Bearer ${env.GROQ_API_KEY}` }, {
           model: this.model, temperature: 0.2, max_tokens: maxTokens, response_format: { type: 'json_object' },

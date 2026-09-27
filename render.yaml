@@ -22,6 +22,12 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: gemini-flash-latest
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: OPEN_SIGNUP
+        value: "true"
       - key: OPENROUTER_API_KEY
         sync: false
       - key: BOOTSTRAP_ADMIN_EMAIL

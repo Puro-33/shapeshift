@@ -14,6 +14,7 @@ const SECRET_PATTERNS = [
   ['groq-key', /\bgsk_[A-Za-z0-9]{40,}\b/g],
   ['openai-key', /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/g],
   ['google-api-key', /\bAIza[0-9A-Za-z_-]{35}\b/g],
+  ['google-api-key', /\bAQ\.[A-Za-z0-9_-]{30,}/g],
   ['slack-token', /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g],
   ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----/g],
   ['password', /((?:password|passwd|pwd|비밀번호)\s*[:=]\s*)(\S{4,})/gi],
