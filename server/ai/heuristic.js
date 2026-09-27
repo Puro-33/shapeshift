@@ -56,7 +56,9 @@ export function heuristicPlan(text, context = {}) {
   if (/공부|개념|정리/.test(t)) tags.push('개념 공부');
   if (/prowler|점검|스캔/i.test(t)) tags.push('점검');
   if (/구현|코드|커밋|배포|CI/i.test(t)) tags.push('개발');
-  const parts = t.split(/(?:,|\.|그리고|하고\s)/).map((s) => s.trim()).filter((s) => s.length > 3);
-  const items = parts.length > 1 && parts.length <= 5 ? parts : [t];
-  return { intent: 'log', summary: `활동 ${items.length}건을 기록해요`, ops: items.map((x) => ({ op: 'log_activity', text: x, tags })) };
+  const dayOffset = /^(어제|어젯밤)/.test(t) ? -1 : /^그제|^그저께/.test(t) ? -2 : 0;
+  const body = t.replace(/^(오늘|어제|어젯밤|그제|그저께)\s*(은|는)?\s*/, '');
+  const parts = body.split(/(?:,|\.|그리고|하고\s)/).map((s) => s.trim()).filter((s) => s.length > 3);
+  const items = parts.length > 1 && parts.length <= 5 ? parts : [body || t];
+  return { intent: 'log', summary: `활동 ${items.length}건을 기록해요`, ops: items.map((x) => ({ op: 'log_activity', text: x, tags, ...(dayOffset ? { dayOffset } : {}) })) };
 }

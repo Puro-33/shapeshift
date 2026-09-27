@@ -162,7 +162,7 @@ export function Admin() {
         <table class="btable mt"><tbody><tr><td>일정</td><td>마감</td><td>종류</td></tr>${season.milestones.map((m) => html`<tr><td>${m.title}</td><td>${m.due || m.start || '-'} ${m.due ? dday(m.due) : ''}</td><td>${m.kind}</td></tr>`)}</tbody></table>
         <div class="small mt">${season.rules.map((r) => html`<div>· ${r.label}</div>`)}</div></details>` : html`<div class="small subtle">아직 시즌이 없어요.</div>`}
       <label class="lbl mt">운영 안내문 붙여넣기 (예: 노션 "SSG 팀 프로젝트 안내" 페이지 전체)</label>
-      <textarea class="input" rows="8" value=${guide} onInput=${(e) => setGuide(e.target.value)} placeholder="프로젝트 기간 : 8월 31일(월) ~ 1월 3일(일)&#10;| 1차 | 9월 20일(일) | 주간 보고서 제출, SSG HUB articles 작성 | ..."></textarea>
+      <textarea class="input" rows="8" value=${guide} onInput=${(e) => setGuide(e.target.value)} placeholder=${'프로젝트 기간 : 8월 31일(월) ~ 1월 3일(일)\n| 1차 | 9월 20일(일) | 주간 보고서 제출, SSG HUB articles 작성 |\n...'}></textarea>
       <div class="row"><button class="btn primary" disabled=${busy || guide.length < 20} onClick=${createSeason}>${busy ? '만드는 중…' : '이 안내문으로 새 시즌 만들기'}</button><span class="small faint">제출 일정표, 최소 요구사항, 파일명 규칙, [팀명] 규칙을 자동으로 읽어요</span></div>
     </div>
     <div class="card mt">

@@ -24,11 +24,11 @@ export function AuthScreen({ onDone }) {
   return html`<div class="auth"><form class="card col" onSubmit=${submit}>
     <div class="brand"><img src="/favicon.svg" alt="" /> Shapeshift</div>
     <h2>${mode === 'login' ? '로그인' : '가입하기'}</h2>
-    <div class="subtle small mb">타이핑 대신 말하면, 구조와 보고서는 AI가 만들어요.</div>
-    ${mode === 'register' ? html`<div><label class="lbl">이름 (팀원 목록과 같은 이름)</label><input class="input" value=${f.name} onInput=${set('name')} required /></div>` : null}
-    <div><label class="lbl">이메일</label><input class="input" type="email" autocomplete="email" value=${f.email} onInput=${set('email')} required /></div>
-    <div><label class="lbl">비밀번호 ${mode === 'register' ? '(8자 이상)' : ''}</label><input class="input" type="password" autocomplete=${mode === 'login' ? 'current-password' : 'new-password'} value=${f.password} onInput=${set('password')} required /></div>
-    ${mode === 'register' ? html`<div><label class="lbl">초대 코드 (선택)</label><input class="input" value=${f.inviteCode} onInput=${set('inviteCode')} /></div>` : null}
+    <div class="subtle small mb">각자의 AI가 읽고 편집하기 쉬운 팀 프로젝트 워크스페이스</div>
+    ${mode === 'register' ? html`<div><label class="lbl" for="f-name">이름 (팀원 목록과 같은 이름)</label><input id="f-name" name="name" class="input" autocomplete="name" value=${f.name} onInput=${set('name')} required /></div>` : null}
+    <div><label class="lbl" for="f-email">이메일</label><input id="f-email" name="email" class="input" type="email" autocomplete="email" value=${f.email} onInput=${set('email')} required /></div>
+    <div><label class="lbl" for="f-password">비밀번호 ${mode === 'register' ? '(8자 이상)' : ''}</label><input id="f-password" name="password" class="input" type="password" autocomplete=${mode === 'login' ? 'current-password' : 'new-password'} value=${f.password} onInput=${set('password')} required /></div>
+    ${mode === 'register' ? html`<div><label class="lbl" for="f-invite">초대 코드 (선택)</label><input id="f-invite" name="inviteCode" class="input" value=${f.inviteCode} onInput=${set('inviteCode')} /></div>` : null}
     ${err ? html`<div class="err">${err}</div>` : null}
     <button class="btn primary" disabled=${busy}>${busy ? '처리 중…' : mode === 'login' ? '로그인' : '가입'}</button>
     <div class="small subtle">${mode === 'login' ? html`계정이 없나요? <a href="#" onClick=${(e) => { e.preventDefault(); setMode('register'); }}>가입하기</a>` : html`이미 계정이 있나요? <a href="#" onClick=${(e) => { e.preventDefault(); setMode('login'); }}>로그인</a>`}</div>
@@ -57,7 +57,7 @@ export function Onboarding() {
   };
   return html`<div class="page-w">
     <h1 class="title">시작하기 👋</h1>
-    <p class="subtle">팀을 만들면 산출물(주간보고서/아티클 마감 슬롯), 활동 로그, 태스크 구조가 자동으로 생겨요. 이후엔 프롬프트로 자유롭게 바꾸면 돼요.</p>
+    <p class="subtle">팀을 만들면 산출물(주간보고서/아티클 마감 슬롯), 활동 로그, 태스크 구조가 자동으로 생겨요. 이후엔 빠른 명령이나 각자의 AI로 자유롭게 바꾸면 돼요.</p>
     <div class="grid2 mt">
       <div class="card col">
         <h3>새 팀 만들기</h3>
@@ -88,7 +88,7 @@ export function Home() {
       get(`/api/prompts?teamId=${app.teamId}&status=planned`),
     ]);
     return { d, a, prompts: prompts.prompts };
-  }, [app.teamId, app.refreshKey]);
+  }, [app.teamId, app.refreshKey, deliv?.id, act?.id]);
   if (!td) return html`<${Spinner} />`;
   const f = (col, name) => col?.fields?.find((x) => x.name === name);
   const items = data?.d?.children || [];
@@ -132,8 +132,8 @@ export function Home() {
       </div>
       <div class="card">
         <h3>구조</h3>
-        ${(td.nodes || []).filter((n) => n.parentId && n.type === 'collection').map((n) => html`<div class="nav" onClick=${() => app.go(`#/t/${app.teamId}/n/${n.id}`)}><span class="ic">${n.icon || '🗂'}</span>${n.title}<span class="small faint" style="margin-left:auto">${(n.fields || []).length}개 필드 · ${(n.views || []).length}개 뷰</span></div>`)}
-        <div class="small subtle mt">구조를 바꾸고 싶으면 말로 하세요: "CloudGoat 시나리오 DB 만들어줘. 난이도, 풀이자, Root Cause, Prowler Coverage 필드 넣어서"</div>
+        ${(td.nodes || []).filter((n) => n.parentId && n.type === 'collection').map((n) => html`<a class="nav" href=${`#/t/${app.teamId}/n/${n.id}`}><span class="ic">${n.icon || '🗂'}</span>${n.title}<span class="small faint" style="margin-left:auto">${(n.fields || []).length}개 필드 · ${(n.views || []).length}개 뷰</span></a>`)}
+        <div class="small subtle mt">구조를 크게 바꾸고 싶으면 "🤖 내 AI에게"로 요청하세요. 예: "CloudGoat 시나리오 DB 만들어줘. 난이도, 풀이자, Root Cause, Prowler Coverage 필드 넣어서"</div>
       </div>
     </div>
   </div>`;

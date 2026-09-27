@@ -104,6 +104,7 @@ r = await form(`/prompts/${pid2}/apply`, { csrf, back: `/p/${reportId}` });
 check('form apply redirects', r.status === 303 && /applied=op_/.test(r.headers.get('location') || ''), r.headers.get('location'));
 r = await call('GET', `/p/${reportId}.md`);
 check('markdown edit persisted', String(r.data).includes('Prowler 결과를 CI에 넣는 방법 조언'));
+check('checklist synced with rules', String(r.data).includes('- [x] 도움 필요(Ask)가 작성 되었는가?'), (String(r.data).match(/- \[.\] 도움 필요[^\n]*/) || [''])[0]);
 r = await call('POST', `/api/nodes/${reportId}/markdown`, { markdown: String(r.data).replace('Prowler 결과를 CI에 넣는 방법 조언', 'CI 통합 조언 요청') });
 check('api markdown preview', r.status === 200 && r.data.status === 'planned' && r.data.provider === 'markdown', JSON.stringify(r.data).slice(0, 200));
 r = await call('POST', '/api/prompts', { teamId, text: JSON.stringify({ summary: 'AI가 제안한 이슈 DB', ops: [{ op: 'create_node', type: 'collection', parent: deliv.parentId, title: 'Issues', fields: [{ name: '심각도', type: 'select', options: ['high', 'low'] }] }] }) });

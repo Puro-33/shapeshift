@@ -549,15 +549,17 @@ export async function collectDiff(ctx) {
   for (const [k, before] of ctx.before) {
     const [kind, id] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
     const after = await ctx.store.get(kind, id);
-    diff.push(describeChange(kind, before, after));
+    const doc = after || before;
+    const parentFields = kind === 'node' && doc?.type === 'item' && doc.parentId ? (await ctx.store.get('node', doc.parentId))?.fields : null;
+    diff.push(describeChange(kind, before, after, parentFields));
   }
   return diff.filter(Boolean);
 }
 
-function describeChange(kind, before, after) {
+function describeChange(kind, before, after, parentFields = null) {
   const doc = after || before;
   if (!doc) return null;
-  const base = { kind, id: doc.id, title: doc.title || doc.name || doc.id, type: doc.type };
+  const base = { kind, id: doc.id, title: doc.title || doc.name || (doc.text ? `${doc.assignee ? `${doc.assignee}: ` : ''}${String(doc.text).slice(0, 60)}` : doc.id), type: doc.type };
   if (!before) return { ...base, action: 'create' };
   if (!after || (after.deleted && !before.deleted)) return { ...base, action: 'delete' };
   const changes = [];
@@ -573,7 +575,7 @@ function describeChange(kind, before, after) {
   for (const v of av) if (!bv.includes(v)) changes.push(`뷰 +${v}`);
   for (const v of bv) if (!av.includes(v)) changes.push(`뷰 -${v}`);
   if (JSON.stringify(before.props || {}) !== JSON.stringify(after.props || {})) {
-    const fields = after.fields || [];
+    const fields = parentFields || after.fields || [];
     const keys = new Set([...Object.keys(before.props || {}), ...Object.keys(after.props || {})]);
     for (const key of keys) {
       if (JSON.stringify(before.props?.[key]) !== JSON.stringify(after.props?.[key])) changes.push(`값 변경(${fields.find((f) => f.id === key)?.name || '속성'})`);
@@ -597,6 +599,7 @@ export async function executePlan(store, ops, { mode = 'apply', ...ctxOpts } = {
     await store.tx(async (tx) => {
       const ctx = new OpContext(tx, ctxOpts);
       const results = await runOps(ctx, ops);
+      if (ctxOpts.afterOps) await ctxOpts.afterOps(ctx);
       const diff = await collectDiff(ctx);
       const destructive = ops.some(isDestructive) || diff.some((d) => d.action === 'delete');
       if (mode === 'preview') {

@@ -30,10 +30,10 @@ function Tree({ nodes, teamId, activeId, go }) {
     const ch = kids[n.id] || [];
     const isOpen = open[n.id] ?? depth === 0;
     return html`<div key=${n.id}>
-      <div class="nav ${activeId === n.id ? 'active' : ''}" style=${`padding-left:${8 + depth * 14}px`} onClick=${() => go(`#/t/${teamId}/n/${n.id}`)}>
-        <span class="caret" onClick=${(e) => { e.stopPropagation(); setOpen({ ...open, [n.id]: !isOpen }); }}>${ch.length ? (isOpen ? '▾' : '▸') : ''}</span>
+      <a class="nav ${activeId === n.id ? 'active' : ''}" style=${`padding-left:${8 + depth * 14}px`} href=${`#/t/${teamId}/n/${n.id}`} data-node-id=${n.id} data-node-type=${n.type} aria-current=${activeId === n.id ? 'page' : null}>
+        <span class="caret" role="button" aria-label=${isOpen ? '접기' : '펼치기'} onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setOpen({ ...open, [n.id]: !isOpen }); }}>${ch.length ? (isOpen ? '▾' : '▸') : ''}</span>
         <span class="ic">${n.icon || (n.type === 'collection' ? '🗂' : '📄')}</span><span style="overflow:hidden;text-overflow:ellipsis">${n.title}</span>
-      </div>
+      </a>
       ${isOpen ? ch.map((c) => row(c, depth + 1)) : null}
     </div>`;
   };
@@ -175,14 +175,17 @@ function App() {
         </div>
         <div class="side-scroll">
           ${teamId ? html`
-            <div class="nav ${route.name === 'home' ? 'active' : ''}" onClick=${() => go(`#/t/${teamId}`)}><span class="ic">🏠</span>홈</div>
-            <div class="nav ${route.name === 'inbox' ? 'active' : ''}" onClick=${() => go(`#/t/${teamId}/inbox`)}><span class="ic">📥</span>인박스${td?.requests?.length ? html`<span class="cnt">${td.requests.length}</span>` : null}</div>
-            <div class="nav ${route.name === 'activity' ? 'active' : ''}" onClick=${() => go(`#/t/${teamId}/activity`)}><span class="ic">↺</span>변경 기록</div>
-            <div class="nav ${route.name === 'settings' ? 'active' : ''}" onClick=${() => go(`#/t/${teamId}/settings`)}><span class="ic">⚙️</span>팀 설정</div>
-            <div class="side-sec"><div class="side-label">워크스페이스</div>
+            <nav aria-label="팀 메뉴">
+            <a class="nav ${route.name === 'home' ? 'active' : ''}" href=${`#/t/${teamId}`}><span class="ic">🏠</span>홈</a>
+            <a class="nav ${route.name === 'inbox' ? 'active' : ''}" href=${`#/t/${teamId}/inbox`}><span class="ic">📥</span>인박스${td?.requests?.length ? html`<span class="cnt">${td.requests.length}</span>` : null}</a>
+            <a class="nav ${route.name === 'activity' ? 'active' : ''}" href=${`#/t/${teamId}/activity`}><span class="ic">↺</span>변경 기록</a>
+            <a class="nav ${route.name === 'settings' ? 'active' : ''}" href=${`#/t/${teamId}/settings`}><span class="ic">⚙️</span>팀 설정</a>
+            <a class="nav" href=${`/t/${teamId}`} target="_blank" rel="noopener"><span class="ic">🔍</span>AI용 보기</a>
+            </nav>
+            <nav class="side-sec" aria-label="워크스페이스"><div class="side-label">워크스페이스</div>
               ${td ? html`<${Tree} nodes=${td.nodes} teamId=${teamId} activeId=${route.nodeId} go=${go} />` : html`<div style="padding:8px"><${Spinner} /></div>`}
-            </div>` : null}
-          ${me.user.isAdmin ? html`<div class="side-sec"><div class="side-label">운영</div><div class="nav ${route.name === 'admin' ? 'active' : ''}" onClick=${() => go('#/admin')}><span class="ic">🛡️</span>운영진 대시보드</div></div>` : null}
+            </nav>` : null}
+          ${me.user.isAdmin ? html`<div class="side-sec"><div class="side-label">운영</div><a class="nav ${route.name === 'admin' ? 'active' : ''}" href="#/admin"><span class="ic">🛡️</span>운영진 대시보드</a></div>` : null}
         </div>
         <div class="side-foot"><span class="grow">${me.user.name}${me.user.isAdmin ? ' · 운영진' : td?.role === 'pm' ? ' · PM' : ''}</span>
           <a class="small" href="/agent" target="_blank" rel="noopener" title="내장 AI 없음. 개인 AI가 읽고 편집하는 방법">🤖 내 AI 연결</a>

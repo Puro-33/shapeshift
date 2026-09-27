@@ -126,7 +126,7 @@ export const teamMacros = {
     const text = String(op.text || '').trim();
     if (!text) throw new OpError('log_activity needs text');
     const values = {
-      날짜: op.date || today(ctx),
+      날짜: op.date || (op.dayOffset ? new Date(ctx.now.getTime() + 9 * 3600 * 1000 + Number(op.dayOffset) * 86400000).toISOString().slice(0, 10) : today(ctx)),
       팀원: op.member ? [].concat(op.member) : (ctx.user ? [ctx.user.name] : []),
     };
     if (op.tags?.length) values['태그'] = op.tags;

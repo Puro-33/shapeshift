@@ -8,7 +8,7 @@ import { heuristicPlan } from './heuristic.js';
 import { maskSecrets, ingestMacros } from '../services/ingest.js';
 import { seasonMacros } from '../services/season.js';
 import { teamMacros } from '../services/teams.js';
-import { reportMacros } from '../services/reports.js';
+import { reportMacros, refreshChecklists } from '../services/reports.js';
 import { notionMacros } from '../services/notion.js';
 
 export const MACROS = { ...seasonMacros, ...teamMacros, ...reportMacros, ...ingestMacros, ...notionMacros };
@@ -131,7 +131,7 @@ export class Orchestrator {
     let error = null;
     const t0 = Date.now();
     if (opsList.length) {
-      try { preview = await executePlan(this.store, opsList, { mode: 'preview', user, teamId, role, macros: MACROS, now }); } catch (e) { if (!(e instanceof OpError)) throw e; error = e; }
+      try { preview = await executePlan(this.store, opsList, { mode: 'preview', user, teamId, role, macros: MACROS, now, afterOps: refreshChecklists }); } catch (e) { if (!(e instanceof OpError)) throw e; error = e; }
     }
     Object.assign(promptDoc, {
       intent: planJson.intent || (opsList.length ? 'build' : 'ask'),
@@ -157,7 +157,7 @@ export class Orchestrator {
     if (p.plan?.destructive && !confirmDestructive) throw new OpError('삭제나 구조 변경이 포함된 계획이라 확인(confirm_destructive=true)이 필요해요');
     const role = await roleFor(this.store, user, p.teamId);
     if (p.userId && user && p.userId !== user.id && role === 'member') throw Object.assign(new OpError('다른 사람의 계획은 PM만 적용할 수 있어요'), { status: 403 });
-    const res = await executePlan(this.store, p.opsFull || p.plan.ops, { mode: 'apply', user, teamId: p.teamId, role, macros: MACROS, now });
+    const res = await executePlan(this.store, p.opsFull || p.plan.ops, { mode: 'apply', user, teamId: p.teamId, role, macros: MACROS, now, afterOps: refreshChecklists });
     const entry = { id: newId('op'), promptId: p.id, userId: user?.id || null, teamId: p.teamId || res.results.find((r) => r.teamId)?.teamId || null, summary: p.plan.summary || p.text, source: p.provider, diff: res.diff, before: res.before, after: res.after, revertedAt: null };
     await this.store.put('oplog', entry);
     p.status = 'applied';
@@ -172,7 +172,7 @@ export class Orchestrator {
 
   async applyDirect({ user, teamId, ops, summary = '직접 편집', now = new Date() }) {
     const role = await roleFor(this.store, user, teamId);
-    const res = await executePlan(this.store, ops, { mode: 'apply', user, teamId, role, macros: MACROS, now });
+    const res = await executePlan(this.store, ops, { mode: 'apply', user, teamId, role, macros: MACROS, now, afterOps: refreshChecklists });
     const entry = { id: newId('op'), promptId: null, userId: user?.id || null, teamId: teamId || res.results.find((r) => r.teamId)?.teamId || null, summary, manual: true, diff: res.diff, before: res.before, after: res.after, revertedAt: null };
     await this.store.put('oplog', entry);
     return { oplogId: entry.id, results: res.results, created: res.created, diff: res.diff, notes: res.notes, teamId: entry.teamId };

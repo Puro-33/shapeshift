@@ -180,6 +180,25 @@ export function checklistBlocks(result) {
   ]);
 }
 
+/** afterOps hook: keep weekly-report checklists in sync with rule checks after any edit. */
+export async function refreshChecklists(ctx) {
+  for (const k of [...ctx.before.keys()]) {
+    if (!k.startsWith('node:')) continue;
+    const node = await ctx.store.get('node', k.slice(5));
+    if (!node || node.deleted || node.type !== 'item') continue;
+    const blocks = node.content || [];
+    const i = blocks.findIndex((b) => /^h[1-3]$/.test(b.type) && /체크리스트/.test(b.text));
+    if (i < 0) continue;
+    const v = await validateNode(ctx.store, { ...node, content: blocks.slice(0, i) });
+    if (!v || v.kind !== 'weekly_report') continue;
+    const fresh = [...blocks.slice(0, i), ...checklistBlocks(v)];
+    const sig = (bs) => JSON.stringify(bs.map((b) => [b.type, b.text, b.checked ?? null]));
+    if (sig(fresh) === sig(blocks)) continue;
+    node.content = fresh.map((b, j) => (blocks[j] && blocks[j].type === b.type && blocks[j].text === b.text ? { ...b, id: blocks[j].id } : b));
+    await ctx.save('node', node);
+  }
+}
+
 export function stripChecklist(blocks) {
   const i = blocks.findIndex((b) => /^h[1-3]$/.test(b.type) && /체크리스트/.test(b.text));
   return i < 0 ? blocks : blocks.slice(0, i);
